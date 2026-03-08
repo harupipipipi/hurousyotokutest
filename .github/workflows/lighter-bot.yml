@@ -16,8 +16,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: lv3-${{ github.run_id }}
-          restore-keys: lv3-
+          key: lv2-${{ github.run_id }}
+          restore-keys: lv2-
       - run: pip install -r requirements.txt
       - run: python bot.py
         env:
