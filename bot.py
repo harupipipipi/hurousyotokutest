@@ -1,4 +1,4 @@
-"""Lighter Portfolio Bot v2 — JPY simple view"""
+"""Lighter Portfolio Bot v3 — JPY simple view"""
 import json, os, sys
 from datetime import datetime, timezone, timedelta
 import requests
@@ -94,7 +94,7 @@ def build(c, prev, base):
         lines.append(f"前回比: {pm(d,dp)}")
     if bd is not None:
         ico="📈" if bup else "📉"
-        lines.append(f"{ico} 今日から: {pm(bd,bp)}")
+        lines.append(f"{ico} 通算: {pm(bd,bp)}　(¥{base['jpy']:,.0f} から)")
 
     return dict(title=ttl, description="\n".join(lines), color=color,
                 footer=dict(text=f"LIT ${c['lp']:,.4f} │ ¥{c['jpy_rate']:,.1f}/$ │ {c['ts']}"))
