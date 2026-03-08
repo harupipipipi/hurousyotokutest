@@ -1,4 +1,4 @@
-"""Lighter Portfolio Bot v3 — JPY simple view"""
+"""Lighter Portfolio Bot v3 — JPY simple view (fixed)"""
 import json, os, sys
 from datetime import datetime, timezone, timedelta
 import requests
@@ -32,7 +32,8 @@ def fetch():
 
     usdc = lit = 0.0
     for a in ac.get("assets",[]):
-        b = float(a.get("balance","0"))+float(a.get("locked_balance","0"))
+        # balance is the total — do NOT add locked_balance (it's a subset)
+        b = float(a.get("balance","0"))
         if   a["symbol"]=="USDC": usdc=b
         elif a["symbol"]=="LIT":  lit=b
 
