@@ -1,6 +1,6 @@
 """Lighter Portfolio Bot v2 — JPY simple view"""
 import json, os, sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import requests
 
 API     = "https://mainnet.zklighter.elliot.ai"
@@ -10,6 +10,7 @@ LIT_MID = 120
 JPY_MID = 98
 STATE   = ".cache/state.json"
 BASE    = ".cache/baseline.json"
+JST     = timezone(timedelta(hours=9))
 
 def log(m):
     print(f"[{datetime.now(timezone.utc):%H:%M:%S}] {m}")
@@ -48,18 +49,17 @@ def fetch():
     sl=(ush/psh)*pl if psh>0 else 0.0
     usd=usdc+lit*lp+sl*lp
 
-    return dict(ts=datetime.now(timezone.utc).isoformat(),
+    now=datetime.now(JST)
+    return dict(ts=now.strftime("%-m/%-d %H:%M"),
                 usd=usd, jpy=usd*jpy, lp=lp, jpy_rate=jpy)
 
 def ld(path):
     try:
         with open(path) as f:
-            d = json.load(f)
-            if "jpy" not in d:
-                return None
+            d=json.load(f)
+            if "jpy" not in d: return None
             return d
-    except Exception:
-        return None
+    except Exception: return None
 
 def sv(path,d):
     os.makedirs(os.path.dirname(path),exist_ok=True)
@@ -97,7 +97,7 @@ def build(c, prev, base):
         lines.append(f"{ico} 今日から: {pm(bd,bp)}")
 
     return dict(title=ttl, description="\n".join(lines), color=color,
-                footer=dict(text=f"LIT ${c['lp']:,.4f} │ ¥{c['jpy_rate']:,.1f}/$ │ {c['ts'][:16]}"))
+                footer=dict(text=f"LIT ${c['lp']:,.4f} │ ¥{c['jpy_rate']:,.1f}/$ │ {c['ts']}"))
 
 def main():
     wh=os.environ.get("DISCORD_WEBHOOK_URL")
