@@ -2,7 +2,7 @@ name: Lighter Portfolio Bot
 
 on:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '0*/3***'
   workflow_dispatch: {}
 
 jobs:
@@ -16,8 +16,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: lv3-${{ github.run_id }}
-          restore-keys: lv3-
+          key: lv4-${{ github.run_id }}
+          restore-keys: lv4-
       - run: pip install -r requirements.txt
       - run: python bot.py
         env:

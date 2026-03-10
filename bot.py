@@ -1,4 +1,8 @@
-"""Lighter Portfolio Bot v3 — JPY simple view (fixed)"""
+"""Lighter Portfolio Bot v4 — Full asset support + JPY
+   Perp (collateral + allocated_margin + unrealized_pnl)
+   + Spot (any token × market price)
+   + Staking (pool shares → LIT × price)
+"""
 import json, os, sys
 from datetime import datetime, timezone, timedelta
 import requests
@@ -6,7 +10,6 @@ import requests
 API     = "https://mainnet.zklighter.elliot.ai"
 ACCT    = 281474976622700
 POOL    = 281474976624800
-LIT_MID = 120
 JPY_MID = 98
 STATE   = ".cache/state.json"
 BASE    = ".cache/baseline.json"
@@ -23,36 +26,65 @@ def get(path, p):
 def fetch():
     ac = get("/api/v1/account",{"by":"index","value":str(ACCT)})["accounts"][0]
     po = get("/api/v1/account",{"by":"index","value":str(POOL)})["accounts"][0]
+    ad = get("/api/v1/assetDetails",{})
     mk = get("/api/v1/orderBookDetails",{})
 
-    lp = jpy = 0.0
+    # --- prices: {symbol: usd} ---
+    prices = {}
+    jpy_rate = 0.0
     for m in mk.get("order_book_details",[]):
-        if m["market_id"]==LIT_MID: lp  = float(m["last_trade_price"])
-        if m["market_id"]==JPY_MID: jpy = float(m["last_trade_price"])
+        prices[m["symbol"]] = float(m["last_trade_price"])
+        if m["market_id"] == JPY_MID:
+            jpy_rate = float(m["last_trade_price"])
+    for m in mk.get("spot_order_book_details",[]):
+        sym = m["symbol"].split("/")[0]
+        if sym not in prices:
+            prices[sym] = float(m["last_trade_price"])
+    for a in ad.get("asset_details",[]):
+        if a["symbol"] not in prices:
+            prices[a["symbol"]] = float(a.get("index_price","0"))
 
-    usdc = lit = 0.0
+    # --- 1) Spot ---
+    spot_usd = 0.0
     for a in ac.get("assets",[]):
-        # balance is the total — do NOT add locked_balance (it's a subset)
-        b = float(a.get("balance","0"))
-        if   a["symbol"]=="USDC": usdc=b
-        elif a["symbol"]=="LIT":  lit=b
+        bal = float(a.get("balance","0"))
+        sym = a["symbol"]
+        if sym == "USDC":
+            spot_usd += bal
+        else:
+            spot_usd += bal * prices.get(sym, 0)
 
-    ush=0
+    # --- 2) Perp ---
+    perp_usd = float(ac.get("collateral","0"))
+    for pos in ac.get("positions",[]):
+        perp_usd += float(pos.get("allocated_margin","0"))
+        perp_usd += float(pos.get("unrealized_pnl","0"))
+
+    # --- 3) Staking ---
+    ush = 0
     for s in ac.get("shares",[]):
-        if s.get("public_pool_index")==POOL:
-            ush=int(s.get("shares_amount",0))
+        if s.get("public_pool_index") == POOL:
+            ush = int(s.get("shares_amount",0))
 
-    psh=int(po.get("pool_info",{}).get("total_shares",1))
-    pl=0.0
+    psh = int(po.get("pool_info",{}).get("total_shares",1))
+    pool_lit = 0.0
     for a in po.get("assets",[]):
-        if a["symbol"]=="LIT": pl=float(a.get("balance","0"))
+        if a["symbol"] == "LIT":
+            pool_lit = float(a.get("balance","0"))
 
-    sl=(ush/psh)*pl if psh>0 else 0.0
-    usd=usdc+lit*lp+sl*lp
+    stk_lit = (ush / psh) * pool_lit if psh > 0 else 0.0
+    stk_usd = stk_lit * prices.get("LIT", 0)
 
-    now=datetime.now(JST)
-    return dict(ts=now.strftime("%-m/%-d %H:%M"),
-                usd=usd, jpy=usd*jpy, lp=lp, jpy_rate=jpy)
+    total_usd = spot_usd + perp_usd + stk_usd
+
+    now = datetime.now(JST)
+    return dict(
+        ts=now.strftime("%-m/%-d %H:%M"),
+        usd=total_usd, jpy=total_usd * jpy_rate,
+        lp=prices.get("LIT",0), jpy_rate=jpy_rate,
+        spot_usd=spot_usd, perp_usd=perp_usd,
+        stk_usd=stk_usd, stk_lit=stk_lit,
+    )
 
 def ld(path):
     try:
@@ -111,7 +143,8 @@ def main():
         notify(wh,[dict(title="❌",description=f"```{e}```",color=0xFF0000)])
         sys.exit(1)
 
-    log(f"¥{c['jpy']:,.0f} (${c['usd']:,.2f})")
+    log(f"¥{c['jpy']:,.0f} (${c['usd']:,.2f}) "
+        f"[spot=${c['spot_usd']:,.2f} perp=${c['perp_usd']:,.2f} stk=${c['stk_usd']:,.2f}]")
 
     prev=ld(STATE)
     base=ld(BASE)
