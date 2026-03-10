@@ -6,13 +6,8 @@ REPO_DIR="hurousyotokutest"
 
 echo ""
 echo "⏰ 通知間隔の変更"
-echo ""
-echo "  1) 5 分 (テスト)"
-echo "  2) 15 分"
-echo "  3) 30 分"
-echo "  4) 1 時間"
-echo "  5) 3 時間"
-echo "  6) カスタム"
+echo "  1) 5 分    2) 15 分   3) 30 分"
+echo "  4) 1 時間  5) 3 時間  6) カスタム"
 read -rp "  > [1-6]: " SEL
 case "$SEL" in
   1) CRON="*/5 * * * *" ;;
@@ -61,10 +56,7 @@ git push origin main
 
 HAS_GH=false; command -v gh &>/dev/null && HAS_GH=true
 if $HAS_GH; then
-  echo "🧪 テスト実行..."
   gh workflow run lighter-bot.yml --repo="$REPO_SLUG" 2>/dev/null \
     && echo "✅ トリガー済み" || echo "⚠️  手動実行してください"
 fi
-
-echo ""
 echo "✅ 間隔: ${CRON}"

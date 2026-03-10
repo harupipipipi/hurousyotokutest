@@ -1,7 +1,7 @@
 """Lighter Portfolio Bot v4 — Full asset support + JPY
    Perp (collateral + allocated_margin + unrealized_pnl)
-   + Spot (any token × market price)
-   + Staking (pool shares → LIT × price)
+   + Spot (any token x market price)
+   + Staking (pool shares -> LIT x price)
 """
 import json, os, sys
 from datetime import datetime, timezone, timedelta
@@ -54,7 +54,7 @@ def fetch():
         else:
             spot_usd += bal * prices.get(sym, 0)
 
-    # --- 2) Perp ---
+    # --- 2) Perp: collateral + allocated_margin + unrealized_pnl ---
     perp_usd = float(ac.get("collateral","0"))
     for pos in ac.get("positions",[]):
         perp_usd += float(pos.get("allocated_margin","0"))
