@@ -22,3 +22,4 @@ jobs:
       - run: python bot.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LIGHTER_READ_TOKEN: ${{ secrets.LIGHTER_READ_TOKEN }} 
