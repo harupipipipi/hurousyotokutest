@@ -1,9 +1,10 @@
-"""Lighter Portfolio Bot v4 — Full asset support + JPY
+"""Lighter Portfolio Bot v5 — Full asset support + JPY + PnL API
    Perp (collateral + allocated_margin + unrealized_pnl)
    + Spot (any token x market price)
    + Staking (pool shares -> LIT x price)
+   + Cumulative PnL via /api/v1/pnl (ignore_transfers=true)
 """
-import json, os, sys
+import json, os, sys, time
 from datetime import datetime, timezone, timedelta
 import requests
 
@@ -12,7 +13,6 @@ ACCT    = 281474976622700
 POOL    = 281474976624800
 JPY_MID = 98
 STATE   = ".cache/state.json"
-BASE    = ".cache/baseline.json"
 JST     = timezone(timedelta(hours=9))
 
 def log(m):
@@ -86,6 +86,32 @@ def fetch():
         stk_usd=stk_usd, stk_lit=stk_lit,
     )
 
+def fetch_pnl():
+    """Fetch cumulative PnL (USD) from Lighter PnL API, excluding deposits/withdrawals."""
+    try:
+        now = int(time.time())
+        r = requests.get(f"{API}/api/v1/pnl", params={
+            "by": "index",
+            "value": str(ACCT),
+            "resolution": "1D",
+            "start_timestamp": 0,
+            "end_timestamp": now,
+            "count_back": 9999,
+            "ignore_transfers": "true",
+        }, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        total = 0.0
+        for e in data.get("pnl", []):
+            total += e.get("trade_pnl", 0)
+            total += e.get("trade_spot_pnl", 0)
+            total += e.get("pool_pnl", 0)
+            total += e.get("staking_pnl", 0)
+        return total
+    except Exception as e:
+        log(f"PnL API failed: {e}")
+        return None
+
 def ld(path):
     try:
         with open(path) as f:
@@ -105,7 +131,7 @@ def pm(val,pct):
     s="+" if val>=0 else "-"
     return f"{s}¥{abs(val):,.0f} ({s}{abs(pct):.2f}%)"
 
-def build(c, prev, base):
+def build(c, prev, pnl_usd):
     j=c["jpy"]
 
     if prev:
@@ -113,8 +139,10 @@ def build(c, prev, base):
     else:
         d=dp=None; up=None
 
-    if base:
-        bd=j-base["jpy"]; bp=(bd/base["jpy"]*100) if base["jpy"] else 0; bup=bd>=0
+    if pnl_usd is not None:
+        bd=pnl_usd*c["jpy_rate"]; bup=bd>=0
+        base_jpy=j-bd
+        bp=(bd/base_jpy*100) if base_jpy else 0
     else:
         bd=bp=None; bup=None
 
@@ -127,7 +155,7 @@ def build(c, prev, base):
         lines.append(f"前回比: {pm(d,dp)}")
     if bd is not None:
         ico="📈" if bup else "📉"
-        lines.append(f"{ico} 通算: {pm(bd,bp)}　(¥{base['jpy']:,.0f} から)")
+        lines.append(f"{ico} 通算: {pm(bd,bp)}")
 
     return dict(title=ttl, description="\n".join(lines), color=color,
                 footer=dict(text=f"LIT ${c['lp']:,.4f} │ ¥{c['jpy_rate']:,.1f}/$ │ {c['ts']}"))
@@ -147,13 +175,15 @@ def main():
         f"[spot=${c['spot_usd']:,.2f} perp=${c['perp_usd']:,.2f} stk=${c['stk_usd']:,.2f}]")
 
     prev=ld(STATE)
-    base=ld(BASE)
 
-    if not base:
-        sv(BASE,c); base=None
-        log("Baseline set")
+    log("Fetching PnL...")
+    pnl_usd=fetch_pnl()
+    if pnl_usd is not None:
+        log(f"PnL: ${pnl_usd:,.2f} (¥{pnl_usd*c['jpy_rate']:,.0f})")
+    else:
+        log("PnL unavailable, skipping cumulative display")
 
-    notify(wh,[build(c,prev,base)]); log("Sent!")
+    notify(wh,[build(c,prev,pnl_usd)]); log("Sent!")
     sv(STATE,c); log("Done.")
 
 if __name__=="__main__": main()
