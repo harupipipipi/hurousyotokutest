@@ -89,6 +89,7 @@ def fetch():
 def fetch_pnl():
     """Fetch cumulative PnL (USD) from Lighter PnL API, excluding deposits/withdrawals."""
     try:
+        token = os.environ.get("LIGHTER_READ_TOKEN", "")
         now = int(time.time() * 1000)
         start = now - 86400 * 500 * 1000
         r = requests.get(f"{API}/api/v1/pnl", params={
@@ -99,6 +100,7 @@ def fetch_pnl():
             "end_timestamp": now,
             "count_back": 500,
             "ignore_transfers": "true",
+            "auth": token,
         }, timeout=30)
         r.raise_for_status()
         data = r.json()
