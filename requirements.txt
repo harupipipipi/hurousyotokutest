@@ -1,2 +1,2 @@
-lighter>=1.0.0
+lighter-sdk>=1.0.7
 requests>=2.31.0
