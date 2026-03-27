@@ -104,13 +104,19 @@ def fetch_pnl():
         }, timeout=30)
         r.raise_for_status()
         data = r.json()
-        total = 0.0
-        for e in data.get("pnl", []):
-            total += e.get("trade_pnl", 0)
-            total += e.get("trade_spot_pnl", 0)
-            total += e.get("pool_pnl", 0)
-            total += e.get("staking_pnl", 0)
-        return total
+        entries = data.get("pnl", [])
+        if not entries:
+            log("PnL API returned empty data")
+            return None
+        last = entries[-1]
+        log(f"PnL last: trade={last.get('trade_pnl',0)} "
+            f"spot={last.get('trade_spot_pnl',0)} "
+            f"pool={last.get('pool_pnl',0)} "
+            f"stk={last.get('staking_pnl',0)}")
+        return (last.get("trade_pnl", 0)
+              + last.get("trade_spot_pnl", 0)
+              + last.get("pool_pnl", 0)
+              + last.get("staking_pnl", 0))
     except Exception as e:
         log(f"PnL API failed: {e}")
         return None
