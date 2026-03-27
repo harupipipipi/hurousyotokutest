@@ -89,8 +89,8 @@ def fetch():
 def fetch_pnl():
     """Fetch cumulative PnL (USD) from Lighter PnL API, excluding deposits/withdrawals."""
     try:
-        now = int(time.time())
-        start = now - 86400 * 500
+        now = int(time.time() * 1000)
+        start = now - 86400 * 500 * 1000
         r = requests.get(f"{API}/api/v1/pnl", params={
             "by": "index",
             "value": str(ACCT),
