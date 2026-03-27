@@ -1,9 +1,7 @@
-"""Lighter Portfolio Bot v7 — SDK + Correct PnL + Full Stats
+"""Lighter Portfolio Bot v8 — SDK + Cumulative PnL + Stats
    Uses lighter-sdk for type-safe API access.
-   PnL entries are DAILY DELTAS; ignore_transfers may not work,
-   so we manually subtract inflow and add outflow.
-   Volume from accountMetadata trade stats.
-   Debug logging for PnL entry verification.
+   PnL entries are CUMULATIVE snapshots.
+   Pure PnL = (trade+spot+pool+stk) - all_inflows + all_outflows
 """
 import asyncio, json, math, os, sys, time
 from datetime import datetime, timezone, timedelta
@@ -37,7 +35,6 @@ async def fetch_all():
         acct_api  = lighter.AccountApi(client)
         order_api = lighter.OrderApi(client)
 
-        # ── public data ──────────────────────────
         ac_resp = await acct_api.account(by="index", value=str(ACCT))
         po_resp = await acct_api.account(by="index", value=str(POOL))
         obd     = await order_api.order_book_details()
@@ -142,12 +139,14 @@ async def fetch_all():
             except Exception as e:
                 log(f"PnL API error: {e}")
 
-        # ── Trade stats (volume) ─────────────────
+        # ── Trade stats (volume) via accountMetadata ──
         total_volume = 0.0
         if token:
             try:
                 meta_resp = await acct_api.account_metadata(
-                    by="index", value=str(ACCT), auth=token,
+                    by="index", value=str(ACCT),
+                    auth=token,
+                    authorization=token,
                 )
                 if meta_resp.account_metadatas:
                     meta = meta_resp.account_metadatas[0]
@@ -191,52 +190,51 @@ async def fetch_all():
 
 def compute_stats(entries, total_usd, total_volume_api):
     """
-    PnL entries are DAILY DELTAS.
-    ignore_transfers=True may not zero inflow/outflow on all API versions,
-    so we always manually strip them:
-      pure daily PnL = (trade_pnl + trade_spot_pnl + pool_pnl + staking_pnl)
-                     - (inflow + spot_inflow + pool_inflow + staking_inflow)
-                     + (outflow + spot_outflow + pool_outflow + staking_outflow)
-    inflow  = deposits INTO account   (inflates balance, not real profit)
-    outflow = withdrawals FROM account (deflates balance, not real loss)
+    PnL entries are CUMULATIVE snapshots.
+    The LAST entry contains the total cumulative values.
+    Pure PnL = (trade + spot + pool + stk)
+             - (in + spot_in + pool_in + stk_in)
+             + (out + spot_out + pool_out + stk_out)
+    Daily deltas are computed from consecutive entries for stats.
     """
     if not entries:
         return None
 
     n = len(entries)
 
-    def entry_raw(e):
-        return sf(e.trade_pnl) + sf(e.trade_spot_pnl) + sf(e.pool_pnl) + sf(e.staking_pnl)
+    def entry_pure(e):
+        raw  = sf(e.trade_pnl) + sf(e.trade_spot_pnl) + sf(e.pool_pnl) + sf(e.staking_pnl)
+        inf  = sf(e.inflow) + sf(e.spot_inflow) + sf(e.pool_inflow) + sf(e.staking_inflow)
+        outf = sf(e.outflow) + sf(e.spot_outflow) + sf(e.pool_outflow) + sf(e.staking_outflow)
+        return raw - inf + outf
 
-    def entry_inflow(e):
-        return sf(e.inflow) + sf(e.spot_inflow) + sf(e.pool_inflow) + sf(e.staking_inflow)
+    # ── Cumulative PnL from last entry ───────
+    cum_pnl = entry_pure(entries[-1])
 
-    def entry_outflow(e):
-        return sf(e.outflow) + sf(e.spot_outflow) + sf(e.pool_outflow) + sf(e.staking_outflow)
-
+    # ── Daily deltas from consecutive entries ─
+    cum_values = [entry_pure(e) for e in entries]
     daily_pnls = []
-    cum_pnl    = 0.0
-    total_in   = 0.0
-    total_out  = 0.0
+    for i in range(n):
+        if i == 0:
+            daily_pnls.append(cum_values[0])
+        else:
+            daily_pnls.append(cum_values[i] - cum_values[i - 1])
 
-    for e in entries:
-        raw  = entry_raw(e)
-        inf  = entry_inflow(e)
-        outf = entry_outflow(e)
-        day  = raw - inf + outf
-        daily_pnls.append(day)
-        cum_pnl  += day
-        total_in += inf
-        total_out += outf
+    last = entries[-1]
+    last_raw  = sf(last.trade_pnl) + sf(last.trade_spot_pnl) + sf(last.pool_pnl) + sf(last.staking_pnl)
+    last_in   = sf(last.inflow) + sf(last.spot_inflow) + sf(last.pool_inflow) + sf(last.staking_inflow)
+    last_out  = sf(last.outflow) + sf(last.spot_outflow) + sf(last.pool_outflow) + sf(last.staking_outflow)
+    log(f"  cum_pnl=${cum_pnl:,.4f} last_raw=${last_raw:,.4f} "
+        f"last_in=${last_in:,.4f} last_out=${last_out:,.4f}")
 
-    log(f"  raw_sum=${sum(entry_raw(e) for e in entries):,.4f} "
-        f"total_inflow=${total_in:,.4f} total_outflow=${total_out:,.4f} "
-        f"pure_pnl=${cum_pnl:,.4f}")
-
+    # ── Deposit estimate ─────────────────────
     deposit_est = total_usd - cum_pnl
     return_rate = (cum_pnl / deposit_est * 100) if abs(deposit_est) > 0.01 else 0.0
-    avg_daily   = cum_pnl / n if n > 0 else 0.0
 
+    # ── Average daily PnL ────────────────────
+    avg_daily = cum_pnl / n if n > 0 else 0.0
+
+    # ── Volatility (sample std-dev) ──────────
     if n > 1:
         mean = sum(daily_pnls) / n
         var  = sum((x - mean) ** 2 for x in daily_pnls) / (n - 1)
@@ -244,19 +242,20 @@ def compute_stats(entries, total_usd, total_volume_api):
     else:
         vol = 0.0
 
+    # ── Sharpe (daily, rf=0) ─────────────────
     sharpe = (avg_daily / vol) if vol > 0 else 0.0
 
-    cum = peak = mdd = 0.0
-    for p in daily_pnls:
-        cum += p
-        if cum > peak: peak = cum
-        dd = peak - cum
+    # ── Max drawdown (from cumulative pure PnL) ─
+    peak = mdd = 0.0
+    for cv in cum_values:
+        if cv > peak: peak = cv
+        dd = peak - cv
         if dd > mdd: mdd = dd
 
+    # ── Volume ───────────────────────────────
     volume = total_volume_api if total_volume_api > 0 else 0.0
 
-    log(f"  cum=${cum_pnl:,.4f} dep≈${deposit_est:,.2f} "
-        f"ret={return_rate:,.2f}% avg=${avg_daily:,.4f} "
+    log(f"  ret={return_rate:,.2f}% avg=${avg_daily:,.4f} "
         f"σ=${vol:,.4f} sharpe={sharpe:,.2f} mdd=${mdd:,.4f}")
 
     return dict(
@@ -294,7 +293,7 @@ def build(c, prev, stats, fee_credit):
     j = c["jpy"]; jpy_rate = c["jpy_rate"]
 
     if prev:
-        d = j - prev["jpy"]; dp = (d / prev["jpy"] * 100) if prev["jpy"] else 0; up = d >= 0
+        d = j - prev["jpy"]; dp = (d/prev["jpy"]*100) if prev["jpy"] else 0; up = d >= 0
     else:
         d = dp = None; up = None
 
